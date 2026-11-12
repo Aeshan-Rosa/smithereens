@@ -1,0 +1,23 @@
+name: Research checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check assistant JavaScript
+        run: |
+          node --check chrome/content/zotero/researchPane.js
+          node --check chrome/content/zotero/research/service.js
+          node --check chrome/content/zotero/research/providers.js
+      - name: Test evidence retrieval and provider events
+        run: node --test test/research-core.test.cjs
+      - name: Check patch whitespace
+        run: git diff --check HEAD
