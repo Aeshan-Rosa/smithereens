@@ -95,13 +95,27 @@ describe('Research workspace', function () {
 		assert.equal(Core.parseEvent('claude', { type: 'stream_event', event: { delta: { type: 'text_delta', text: 'Hello' } } }).text, 'Hello');
 	});
 
-	it('checks the installed subscription and answers through Codex', async function () {
-		if (!Services.env.get('SMITHEREENS_LIVE_TEST')) this.skip();
-		this.timeout(240000);
-		let status = await service.providers.status('codex');
-		assert.isTrue(status.connected, status.message);
-		let result = await service.providers.ask({ provider: 'codex', prompt: Core.prompt({ question: 'What number is reported? Answer one sentence with a citation.', sources: [{ id: 'S1', title: 'Test fixture', pageLabel: '1', text: 'The experiment included 42 samples.' }] }), onText: () => {}, signal: new win.AbortController().signal });
-		assert.include(result.text, '42');
-		assert.include(result.text, '[S1]');
-	});
+	for (let provider of ['codex', 'claude']) {
+		it(`compares two papers with citations through the ${provider} subscription`, async function () {
+			let enabled = Services.env.get('SMITHEREENS_LIVE_TEST');
+			if (enabled !== 'all' && enabled !== provider && !(enabled === '1' && provider === 'codex')) this.skip();
+			this.timeout(240000);
+			let status = await service.providers.status(provider);
+			assert.isTrue(status.connected, status.message);
+			let updates = [];
+			let result = await service.providers.ask({ provider, prompt: Core.prompt({
+				question: 'Compare the sample counts in Paper A and Paper B. State each count and cite its source separately. Use two short sentences.',
+				sources: [
+					{ id: 'S1', title: 'Paper A', pageLabel: '1', text: 'The experiment included 42 samples.' },
+					{ id: 'S2', title: 'Paper B', pageLabel: '2', text: 'The experiment included 17 samples.' }
+				]
+			}), onText: text => updates.push(text), signal: new win.AbortController().signal });
+			assert.include(result.text, '42');
+			assert.include(result.text, '17');
+			assert.include(result.text, '[S1]');
+			assert.include(result.text, '[S2]');
+			assert.isAbove(updates.length, 0);
+			assert.equal(updates.at(-1).trim(), result.text);
+		});
+	}
 });

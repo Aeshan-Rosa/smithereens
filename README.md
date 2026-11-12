@@ -31,7 +31,7 @@ The Folio identity pairs an ivory folded-paper **S** with forest green. The inte
 
 ## Getting started
 
-1. Open **Smithereens.app** from your local build.
+1. Open **Smithereens.app** from Applications (or from your local build).
 2. Sign in to a supported local CLI: `codex login` or `claude auth login`.
 3. Open assistant settings, choose the provider, and select **Check connection**. No API key is required.
 4. Add papers through Zotero. Select them and click **Selected**, or open a PDF and choose **Open PDF**.
@@ -69,6 +69,8 @@ scripts/package-mac.sh
 
 Open `dist/Smithereens.app`. For an isolated development library inside this checkout, run `scripts/run-dev.sh`. Rebuild the icon family with `scripts/build-branding.sh`.
 
+To install a local build, quit Smithereens and copy `dist/Smithereens.app` into `/Applications`. Open that copy, then use its Dock menu: **Options → Keep in Dock**. Normal launches keep the library and chat history in the Smithereens profile under `~/Library/Application Support/Smithereens`, independently of this checkout. The development profile is separate; copying the app alone does not transfer its library.
+
 The source retains Zotero's other platform build scripts; Windows and Linux packages have not been verified for Smithereens. Local macOS builds are ad-hoc signed, not notarized. Build output, local libraries, credentials, and chat history are excluded from Git.
 
 ## Validation
@@ -80,11 +82,12 @@ node --test test/research-core.test.cjs
 # Native desktop integration and original reader regression tests
 test/runtests.sh research reader
 
-# Optional: uses your Codex subscription for a tiny synthetic evidence test
-SMITHEREENS_LIVE_TEST=1 test/runtests.sh research
+# Optional: tiny synthetic comparison using both signed-in subscriptions
+SMITHEREENS_LIVE_TEST=all test/runtests.sh -f research
+# Use codex or claude instead of all to test only one provider
 ```
 
-**Verified locally:** 20 desktop/integration checks and 7 standalone checks passed. A real Codex subscription request was verified, along with paper import, source-linked PDF navigation, saved notes, and restored conversations. Claude's CLI interface is supported; a live Claude response has not been verified on this machine.
+**Verified locally:** 21 desktop/integration checks and 7 standalone checks passed. Real Codex and Claude subscription requests compared two synthetic papers with citations. Paper import, source-linked PDF navigation, saved notes, and restored conversations were also verified. macOS Keychain-backed Claude sign-in requires a normal desktop process; a restricted shell can incorrectly report that it is signed out.
 
 ## Status and limits
 

@@ -15,7 +15,7 @@ The assistant can be hidden with its close button, the toolbar button, or **Cmd/
 
 ## Existing subscriptions
 
-Install and sign in to a recent Codex CLI (`codex login`) or Claude Code CLI (`claude auth login`). Choose the provider in assistant settings and click **Check connection**. A custom executable path and model name are optional. The implementation was verified with Codex CLI 0.162.1 and Claude Code CLI 2.1.319 command interfaces; Codex was also verified with a real subscription request on this machine. Claude requires an active first-party subscription login before questions can run.
+Install and sign in to a recent Codex CLI (`codex login`) or Claude Code CLI (`claude auth login`). Choose the provider in assistant settings and click **Check connection**. A custom executable path and model name are optional. The implementation was verified with Codex CLI 0.162.1 and Claude Code CLI 2.1.319. Both providers passed a real subscription request comparing two synthetic papers with separate source citations. Claude requires an active first-party subscription login before questions can run; macOS Keychain access must be available to the process checking its status.
 
 No API key is required. Provider children do not inherit API key overrides. Codex uses an ephemeral, read-only, isolated CLI request with user configuration, shell, plugins, hooks, and web search disabled. Claude uses safe mode with no tools or MCP servers. The app does not copy or display authentication tokens. Questions, bounded prior conversation, and selected excerpts go to the chosen provider; its subscription limits and data policies apply. Codex displays completed message events; Claude supports text deltas. Requests can be stopped and have a four-minute limit.
 
@@ -43,8 +43,8 @@ npm ci
 app/scripts/fetch_xulrunner -p m
 scripts/package-mac.sh
 test/runtests.sh research reader
-# Optional: sends a tiny synthetic passage using your Codex subscription
-SMITHEREENS_LIVE_TEST=1 test/runtests.sh research
+# Optional: compares synthetic papers using both subscriptions
+SMITHEREENS_LIVE_TEST=all test/runtests.sh -f research
 ```
 
 The macOS package is locally ad-hoc signed, not notarized for public distribution. Upstream application updates are disabled so they cannot replace this fork. Other platforms retain upstream build scripts but have not been packaged or verified here. The upstream dependency lockfile is preserved; npm reports inherited vulnerabilities that need a separate dependency audit before public distribution.
