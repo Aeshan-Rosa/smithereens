@@ -1,13 +1,15 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 var ResearchPane = new function () {
 	let service, session, labels, root, messages, sources, composer, status, settings, history, mentions, projectInstructions;
-	let tabs, modelSelect, modelInput, executableInput, draftTimer, markdown, mentionRequest = 0;
-	let controllers = new Map(), statuses = new Map(), catalogs = new Map();
+	let tabs, modelInput, executableInput, draftTimer, markdown, mentionRequest = 0;
+	let controllers = new Map(), statuses = new Map(), catalogs = new Map(), catalogRequests = new Map();
+	let popovers = [], activePopover, popoverTrigger, modelButton, modelMenu, sourcePicker, quick, historyList, historySearch, conversationTitle;
 	let busy = () => controllers.has(session?.id);
 	let ready = false;
 	let html = (tag, props = {}, ...children) => {
 		let node = document.createElementNS('http://www.w3.org/1999/xhtml', tag);
 		for (let [key, value] of Object.entries(props)) {
+			if (value === undefined) continue;
 			if (key.startsWith('on')) node.addEventListener(key.slice(2).toLowerCase(), value);
 			else if (key === 'className') node.className = value;
 			else node.setAttribute(key, value);
@@ -16,6 +18,23 @@ var ResearchPane = new function () {
 		return node;
 	};
 	let button = (label, action, props = {}) => html('button', { type: 'button', onclick: () => safely(action), ...props }, label);
+	// Original line icons keep the extension-style controls crisp at small sizes.
+	let icon = name => {
+		let paths = {
+			plus: 'M8 2v12M2 8h12', close: 'M4 4l8 8M12 4l-8 8',
+			history: 'M2 7a6 6 0 1 1 1 5M2 2v5h5M8 4v4l3 2',
+			settings: 'M3 4h10M3 8h10M3 12h10M6 2v4M10 6v4M6 10v4',
+			send: 'M8 13V3M3 8l5-5 5 5', stop: 'M4 4h8v8H4z',
+			chevron: 'M5 6l3 3 3-3', paper: 'M4 1h5l3 3v11H4zM9 1v4h3M6 8h4M6 11h4',
+			copy: 'M6 5h7v9H6zM10 5V2H3v9h3', note: 'M3 2h10v9l-3 3H3zM10 14v-3h3M6 5h4M6 8h4',
+			slash: 'M10 2L6 14', check: 'M3 8l3 3 7-7', down: 'M8 3v10M3 8l5 5 5-5'
+		};
+		let svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		for (let [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(key, value);
+		let path = document.createElementNS(svg.namespaceURI, 'path'); path.setAttribute('d', paths[name]); svg.append(path);
+		return svg;
+	};
+	let iconButton = (name, label, action, props = {}) => button(icon(name), action, { className: 'research-icon-button', title: label, 'aria-label': label, ...props });
 	let safely = async action => {
 		try { await action(); }
 		catch (error) { setStatus(error.message, true); Zotero.logError(error); }
@@ -23,13 +42,14 @@ var ResearchPane = new function () {
 	let setStatus = (text, error = false) => {
 		status.textContent = text;
 		status.classList.toggle('error', error);
+		status.hidden = !text || text === labels?.ready || text === labels?.responding;
 	};
 
 	this.init = async function () {
 		if (ready) return;
 		ready = true;
 		root = document.getElementById('research-pane');
-		let keys = ['title', 'new', 'history', 'settings', 'close', 'sources', 'selected', 'current', 'collection', 'library', 'send', 'stop', 'placeholder', 'empty', 'summary', 'compare', 'matrix', 'claims', 'screen', 'draft', 'deep', 'save-note', 'copy', 'check', 'provider', 'model', 'instructions', 'path', 'disclosure', 'ready', 'remove', 'clear', 'discover', 'tabs', 'actions', 'working', 'responding', 'connecting', 'models', 'default-model', 'context', 'send-hint'];
+		let keys = ['title', 'new', 'history', 'settings', 'close', 'sources', 'selected', 'current', 'collection', 'library', 'send', 'stop', 'placeholder', 'empty', 'summary', 'compare', 'matrix', 'claims', 'screen', 'draft', 'deep', 'save-note', 'copy', 'check', 'provider', 'model', 'instructions', 'path', 'disclosure', 'ready', 'remove', 'clear', 'discover', 'tabs', 'actions', 'working', 'responding', 'connecting', 'models', 'default-model', 'context', 'send-hint', 'attach', 'search-history', 'no-history', 'commands', 'refresh-models', 'auto-context', 'claude-welcome', 'codex-welcome', 'welcome-detail', 'evidence', 'jump-latest', 'close-menu'];
 		let values = await document.l10n.formatValues(keys.map(key => ({ id: `research-${key}` })));
 		labels = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
 		let Service = require('zotero/research/service');
@@ -40,37 +60,41 @@ var ResearchPane = new function () {
 		session = service.activeSession(service.state.settings.provider);
 		markdown = require('resource://zotero/research-markdown.js')({ html: false, linkify: false, breaks: true });
 		markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(tokens[index].content);
-		let header = html('header', {}, html('div', { className: 'research-brand' },
-			html('img', { src: 'chrome://zotero/skin/smithereens-icon.png', alt: '', width: '30', height: '30' }),
-			html('strong', {}, 'Smithereens')), html('div', { className: 'research-actions' },
-			button('+', () => activate(service.newSession(session.provider)), { title: labels.new, 'aria-label': labels.new }),
-			button('◷', () => { history.hidden = !history.hidden; renderHistory(); }, { title: labels.history, 'aria-label': labels.history }),
-			button('⚙', () => { settings.hidden = !settings.hidden; }, { title: labels.settings, 'aria-label': labels.settings }),
-			button('×', () => this.toggle(), { title: labels.close, 'aria-label': labels.close })));
 		tabs = html('div', { className: 'research-tabs', role: 'tablist', 'aria-label': labels.tabs },
 			...['claude', 'codex'].map(provider => button(provider === 'claude' ? 'Claude Code' : 'Codex', () => activate(service.activeSession(provider)),
 				{ role: 'tab', id: `research-tab-${provider}`, 'aria-controls': 'research-conversation' })));
+		let header = html('header', { className: 'research-header' }, tabs,
+			iconButton('close', labels.close, () => this.toggle()));
+		conversationTitle = button('', () => togglePopover(history, conversationTitle), { className: 'research-conversation-title', 'aria-label': labels.history, 'aria-haspopup': 'dialog' });
+		let toolbar = html('div', { className: 'research-toolbar' }, conversationTitle, html('div', { className: 'research-actions' },
+			iconButton('history', labels.history, () => togglePopover(history, document.getElementById('research-history-toggle')), { id: 'research-history-toggle', 'aria-haspopup': 'dialog' }),
+			iconButton('settings', labels.settings, () => togglePopover(settings, document.getElementById('research-settings-toggle')), { id: 'research-settings-toggle', 'aria-haspopup': 'dialog' }),
+			iconButton('plus', labels.new, () => activate(service.newSession(session.provider)))));
 		tabs.addEventListener('keydown', event => {
 			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
 				event.preventDefault(); safely(async () => { await activate(service.activeSession(session.provider === 'codex' ? 'claude' : 'codex')); document.getElementById(`research-tab-${session.provider}`).focus(); });
 			}
 		});
-		history = html('div', { className: 'research-history', hidden: 'hidden' });
+		historySearch = html('input', { type: 'search', placeholder: labels['search-history'], 'aria-label': labels['search-history'], oninput: () => renderHistory() });
+		historyList = html('div', { className: 'research-history-list' });
+		history = makePopover('research-history', labels.history, historySearch, historyList);
 		settings = buildSettings();
-		sources = html('div', { className: 'research-source-list' });
-		let sourcePicker = html('details', { className: 'research-sources' },
-			html('summary', {}, labels.sources),
+		sources = html('div', { className: 'research-source-list', 'aria-label': labels.context });
+		sourcePicker = makePopover('research-sources', labels.attach,
 			html('div', { className: 'research-source-actions' },
-				...['selected', 'current', 'collection', 'library'].map(scope => button(labels[scope], () => addSources(scope)))), sources);
+				...['current', 'selected', 'collection', 'library'].map(scope => button(labels[scope], async () => { await addSources(scope); closePopover(); composer.focus(); }))), buildDiscovery());
 		messages = html('div', { id: 'research-conversation', className: 'research-messages', role: 'tabpanel', 'aria-label': labels.title, tabindex: '0' });
 		mentions = html('div', { className: 'research-mentions', hidden: 'hidden', 'aria-label': 'Matching papers' });
-		composer = html('textarea', { rows: '3', placeholder: labels.placeholder, 'aria-label': labels.placeholder,
+		composer = html('textarea', { rows: '2', placeholder: labels.placeholder, 'aria-label': labels.placeholder,
 			onkeydown: event => {
 				if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); safely(send); }
 			} });
 		let mentionTimer;
 		composer.addEventListener('input', () => {
 			session.draft = composer.value;
+			resizeComposer();
+			if (composer.value === '/') togglePopover(quick, document.getElementById('research-command-toggle'), false);
+			else if (activePopover === quick) closePopover(false);
 			clearTimeout(draftTimer);
 			draftTimer = setTimeout(() => safely(() => service.save()), 250);
 			clearTimeout(mentionTimer);
@@ -89,7 +113,7 @@ var ResearchPane = new function () {
 					if (session !== current) return;
 					composer.value = composer.value.replace(/@[^@\n]+$/, `“${item.getField('title')}” `);
 					session.draft = composer.value; await service.save();
-					mentions.hidden = true; composer.focus();
+					mentions.hidden = true; resizeComposer(); composer.focus();
 				})));
 				mentions.hidden = !mentions.childElementCount;
 			}), 180);
@@ -103,17 +127,40 @@ var ResearchPane = new function () {
 			draft: 'Draft a concise literature synthesis using these papers. Organize by themes, distinguish evidence from interpretation, and cite every substantive claim. Topic: ',
 			deep: 'Conduct a bounded evidence review of the provided excerpts: map the central claims, compare methods and results, identify contradictions and gaps, then synthesize with citations. List what cannot be assessed from these excerpts.'
 		};
-		let quick = html('details', { className: 'research-quick' }, html('summary', {}, labels.actions), ...Object.entries(templates).map(([key, text]) => button(labels[key], () => { session.draft = text; composer.value = text; composer.focus(); safely(() => service.save()); })));
-		let sendButton = button(labels.send, send, { className: 'research-primary', id: 'research-send' });
-		let stopButton = button(labels.stop, () => controllers.get(session.id)?.abort(), { id: 'research-stop', hidden: 'hidden' });
-		modelSelect = html('select', { id: 'research-model', 'aria-label': labels.models });
-		modelSelect.addEventListener('change', () => safely(async () => {
-			service.state.settings.models[session.provider] = modelSelect.value;
-			modelInput.value = modelSelect.value; await service.save();
-		}));
-		root.append(header, tabs, history, settings, buildDiscovery(), sourcePicker, messages,
-			html('footer', {}, quick, mentions, composer, html('div', { className: 'research-compose-actions' },
-				modelSelect, stopButton, sendButton), html('small', { className: 'research-compose-hint' }, labels['send-hint']), status));
+		quick = makePopover('research-quick', labels.commands, ...Object.entries(templates).map(([key, text]) => button(labels[key], () => {
+			session.draft = text; composer.value = text; closePopover(); resizeComposer(); composer.focus(); safely(() => service.save());
+		})));
+		let sendButton = iconButton('send', labels.send, send, { className: 'research-icon-button research-primary', id: 'research-send' });
+		let stopButton = iconButton('stop', labels.stop, () => controllers.get(session.id)?.abort(), { className: 'research-icon-button research-primary', id: 'research-stop', hidden: 'hidden' });
+		modelButton = button('', async () => {
+			togglePopover(modelMenu, modelButton);
+			if (!modelMenu.hidden) await loadModels();
+		}, { id: 'research-model-toggle', className: 'research-model-button', 'aria-label': labels.models, 'aria-haspopup': 'dialog' });
+		modelMenu = makePopover('research-model-menu', labels.models);
+		let composerBox = html('div', { className: 'research-composer' }, sources, composer,
+			html('div', { className: 'research-compose-actions' },
+				iconButton('plus', labels.attach, () => togglePopover(sourcePicker, document.getElementById('research-source-toggle')), { id: 'research-source-toggle', 'aria-haspopup': 'dialog' }),
+				modelButton, html('span', { className: 'research-toolbar-spacer' }),
+				iconButton('slash', labels.commands, () => togglePopover(quick, document.getElementById('research-command-toggle')), { id: 'research-command-toggle', 'aria-haspopup': 'dialog' }),
+				stopButton, sendButton));
+		root.append(header, toolbar, messages,
+			html('footer', {}, status, mentions, composerBox),
+			history, settings, sourcePicker, quick, modelMenu);
+		root.addEventListener('keydown', event => {
+			if (event.key === 'Escape') {
+				if (activePopover || !mentions.hidden) { event.preventDefault(); closePopover(); mentions.hidden = true; composer.focus(); }
+				else if (busy()) { event.preventDefault(); controllers.get(session.id)?.abort(); }
+			}
+			if (activePopover && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+				let items = [...activePopover.querySelectorAll('button:not(:disabled), input, textarea')];
+				let index = items.indexOf(document.activeElement);
+				if (items.length) { event.preventDefault(); items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus(); }
+			}
+		});
+		document.addEventListener('pointerdown', event => {
+			if (activePopover && !activePopover.contains(event.target) && !popoverTrigger?.contains(event.target)) closePopover(false);
+		});
+		new ResizeObserver(() => resizeComposer()).observe(root);
 		render();
 		setStatus(labels.ready);
 		if (!Zotero.Prefs.get('research.initialized')) {
@@ -136,7 +183,7 @@ var ResearchPane = new function () {
 				await mergeSources(docs, current);
 				if (session !== current) return;
 				composer.value = `Explain this passage in context:\n\n${params.annotation.text}`;
-				session.draft = composer.value; await service.save(); composer.focus();
+				session.draft = composer.value; await service.save(); resizeComposer(); composer.focus();
 			}));
 			append(control);
 		};
@@ -167,24 +214,89 @@ var ResearchPane = new function () {
 		session = next;
 		service.state.settings.provider = session.provider;
 		service.state.activeSessions[session.provider] = session.id;
-		mentions.hidden = true; history.hidden = true;
+		mentions.hidden = true; closePopover(false);
+		root.dataset.provider = session.provider;
 		render();
 		await service.save();
 		composer.focus();
+	}
+
+	function makePopover(className, title, ...children) {
+		let pane = html('section', { className: `research-popover ${className}`, hidden: 'hidden', role: 'dialog', 'aria-label': title },
+			html('div', { className: 'research-popover-heading' }, html('strong', {}, title), iconButton('close', labels['close-menu'], () => closePopover())), ...children);
+		popovers.push(pane);
+		return pane;
+	}
+
+	function closePopover(restoreFocus = true) {
+		for (let pane of popovers) pane.hidden = true;
+		popoverTrigger?.setAttribute('aria-expanded', 'false');
+		if (restoreFocus) popoverTrigger?.focus();
+		activePopover = null;
+	}
+
+	function togglePopover(pane, trigger, focus = true) {
+		let open = pane.hidden;
+		closePopover(false);
+		if (!open) return;
+		popoverTrigger = trigger; activePopover = pane; pane.hidden = false;
+		trigger?.setAttribute('aria-expanded', 'true');
+		if (pane === history) { historySearch.value = ''; renderHistory(); }
+		if (focus) (pane.querySelector('input, textarea') || pane.querySelector('button'))?.focus();
+	}
+
+	function resizeComposer() {
+		if (!composer || root.hidden) return;
+		composer.style.height = 'auto';
+		composer.style.height = Math.min(180, Math.max(54, composer.scrollHeight)) + 'px';
+	}
+
+	async function selectModel(value) {
+		if (busy()) return;
+		service.state.settings.models[session.provider] = value;
+		modelInput.value = value; renderModels(); closePopover(); composer.focus();
+		await service.save();
+	}
+
+	async function loadModels() {
+		let provider = session.provider;
+		if (catalogRequests.has(provider)) return catalogRequests.get(provider);
+		let request = (async () => {
+			try {
+				let prefs = service.state.settings;
+				let client = await service.providers.connect({ provider, model: prefs.models[provider], executable: prefs.executables[provider] });
+				catalogs.set(provider, client.models);
+			}
+			catch (error) { if (session.provider === provider) setStatus(error.message, true); }
+			finally { catalogRequests.delete(provider); if (session.provider === provider) renderModels(); }
+		})();
+		catalogRequests.set(provider, request); renderModels();
+		return request;
 	}
 
 	function renderModels() {
 		let selected = service.state.settings.models[session.provider] || '';
 		let options = [{ value: '', label: labels['default-model'] }, ...(catalogs.get(session.provider) || [])];
 		if (selected && !options.some(o => o.value === selected)) options.push({ value: selected, label: selected });
-		modelSelect.replaceChildren(...options.map(option => html('option', { value: option.value }, option.label)));
-		modelSelect.value = selected;
-		modelSelect.disabled = busy();
+		modelButton.disabled = busy();
+		modelButton.dataset.value = selected;
+		let chosen = options.find(option => option.value === selected);
+		modelButton.replaceChildren(html('span', {}, chosen.label), icon('chevron'));
+		modelButton.title = chosen.label;
+		let heading = modelMenu.firstElementChild;
+		modelMenu.replaceChildren(heading, ...options.map(option => button(html('span', {}, option.label), () => selectModel(option.value),
+			{ className: option.value === selected ? 'active' : '', 'data-value': option.value, 'aria-pressed': String(option.value === selected), disabled: busy() ? 'disabled' : undefined })),
+			button(catalogRequests.has(session.provider) ? labels.connecting : labels['refresh-models'], loadModels, { className: 'research-menu-secondary' }));
 	}
 
 	function updateControls() {
 		document.getElementById('research-send').disabled = busy();
 		document.getElementById('research-stop').hidden = !busy();
+		document.getElementById('research-send').hidden = busy();
+		root.dataset.provider = session.provider;
+		conversationTitle.replaceChildren(html('span', {}, session.messages.length ? session.title : labels.new), icon('chevron'));
+		conversationTitle.title = session.title;
+		composer.placeholder = busy() ? labels['working'] : labels.placeholder;
 		for (let tab of tabs.children) {
 			let provider = tab.id.replace('research-tab-', '');
 			let selected = session.provider === provider;
@@ -226,7 +338,7 @@ var ResearchPane = new function () {
 			}
 			finally { check.disabled = false; }
 		});
-		return html('section', { className: 'research-settings', hidden: 'hidden' },
+		return makePopover('research-settings', labels.settings,
 			html('label', {}, labels.model, modelInput), html('label', {}, labels.path, executableInput),
 			html('label', {}, labels.instructions, projectInstructions), check, html('p', { className: 'research-disclosure' }, labels.disclosure));
 	}
@@ -313,12 +425,16 @@ var ResearchPane = new function () {
 		if (session.scope) sources.prepend(html('div', { className: 'research-scope' },
 			html('small', {}, `Search: ${session.scope.name} · up to 24 matching papers per answer`),
 			button('×', async () => { if (busy()) return; delete session.scope; renderSources(); await service.save(); }, { 'aria-label': 'Remove search scope' })));
-		if (!session.sources.length && !session.scope) sources.append(html('p', {}, 'Select papers in your library, then choose “Selected”.'));
+		if (!session.sources.length && !session.scope) sources.append(button(labels['auto-context'], () => togglePopover(sourcePicker, document.getElementById('research-source-toggle')), { className: 'research-auto-context', title: labels['welcome-detail'] }));
 	}
 
 	function renderHistory() {
-		history.replaceChildren(...service.state.sessions.filter(saved => saved.provider === session.provider).map(saved => button(saved.title,
+		let query = historySearch.value.toLocaleLowerCase().trim();
+		let saved = service.state.sessions.filter(saved => saved.provider === session.provider && (!query || saved.title.toLocaleLowerCase().includes(query)
+			|| saved.messages.some(message => message.text.toLocaleLowerCase().includes(query))));
+		historyList.replaceChildren(...saved.map(saved => button(html('span', {}, saved.title),
 			() => activate(saved), { className: saved.id === session.id ? 'active' : '' })));
+		if (!saved.length) historyList.append(html('p', { className: 'research-muted' }, labels['no-history']));
 	}
 
 	function render(preserveScroll = false) {
@@ -332,10 +448,11 @@ var ResearchPane = new function () {
 		composer.value = session.draft || '';
 		messages.replaceChildren();
 		if (!session.messages.length) messages.append(html('div', { className: 'research-empty' },
-			html('h2', {}, session.provider === 'claude' ? 'Claude Code' : 'Codex'), html('p', {}, labels.empty)));
+			html('span', { className: 'research-provider-mark', 'aria-hidden': 'true' }, session.provider === 'claude' ? '✳' : '⌘'),
+			html('h2', {}, labels[`${session.provider}-welcome`]), html('p', {}, labels['welcome-detail'])));
 		for (let message of session.messages) renderMessage(message);
 		messages.scrollTop = preserveScroll && !atBottom ? scroll : messages.scrollHeight;
-		updateControls();
+		updateControls(); resizeComposer();
 	}
 
 	function inline(node, text, evidence) {
@@ -383,20 +500,20 @@ var ResearchPane = new function () {
 		let body = html('div', { className: 'research-answer' });
 		renderAnswer(body, message);
 		let article = html('article', { className: `research-message ${message.role}`, 'data-message-id': message.id || '' },
-			html('small', {}, message.role === 'user' ? 'You' : (message.provider || 'Assistant')), body);
+			html('small', { className: 'research-sr-only' }, message.role === 'user' ? 'You' : (message.provider || 'Assistant')), body);
 		if (message.role === 'assistant' && !message.pending) {
 			article.append(html('div', { className: 'research-message-actions' },
-				button(labels['save-note'], async () => { let note = await service.saveNote(message, session); setStatus('Saved to your Zotero library.'); await ZoteroPane.selectItem(note.id); }),
-				button(labels.copy, () => { Zotero.Utilities.Internal.copyTextToClipboard(message.text); setStatus('Copied.'); })));
+				iconButton('note', labels['save-note'], async () => { let note = await service.saveNote(message, session); setStatus('Saved to your Zotero library.'); await ZoteroPane.selectItem(note.id); }),
+				iconButton('copy', labels.copy, () => { Zotero.Utilities.Internal.copyTextToClipboard(message.text); setStatus('Copied.'); })));
 			if (message.error) article.append(html('p', { className: 'error' }, message.error));
 			if (message.warnings?.length) article.append(html('details', {}, html('summary', {}, 'Source warnings'),
 				...message.warnings.map(warning => html('p', { className: 'research-disclosure' }, warning))));
 			if (message.evidence?.length) {
-				let details = html('details', {}, html('summary', {}, `${new Set(message.evidence.map(s => s.parentID)).size} papers · ${message.evidence.length} excerpts used`));
+				let details = html('details', { className: 'research-evidence' }, html('summary', {}, `${labels.evidence} · ${new Set(message.evidence.map(s => s.parentID)).size}`));
 				for (let source of message.evidence) details.append(html('p', { className: 'research-disclosure' }, `${source.id} · ${source.title} · ${source.pageLabel}`));
-				article.append(details);
+				if (message.usage) details.append(html('small', {}, `${message.usage.input_tokens || 0} input · ${message.usage.output_tokens || 0} output tokens`));
+				article.querySelector('.research-message-actions').append(details);
 			}
-			if (message.usage) article.append(html('small', {}, `${message.usage.input_tokens || 0} input · ${message.usage.output_tokens || 0} output tokens`));
 		}
 		messages.append(article);
 		return body;
@@ -404,6 +521,7 @@ var ResearchPane = new function () {
 
 	async function send() {
 		if (busy() || !composer.value.trim()) return;
+		closePopover(false); mentions.hidden = true;
 		let current = session, provider = current.provider, prefs = service.state.settings;
 		let model = prefs.models[provider], executable = prefs.executables[provider];
 		let question = composer.value.trim();
@@ -458,7 +576,7 @@ var ResearchPane = new function () {
 					}, 50);
 				} });
 			answer.text = result.text; answer.usage = result.usage;
-			report(warnings.length ? warnings.join(' · ') : 'Answer complete · check citations against the original papers.');
+			report('');
 		}
 		catch (error) { answer.error = error.message; report(error.message, true); }
 		finally {

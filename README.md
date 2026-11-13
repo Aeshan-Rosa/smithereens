@@ -12,7 +12,7 @@
 </p>
 <p align="center"><a href="#getting-started">Get started</a> · <a href="#build-from-source">Build</a> · <a href="docs/implementation.md">Technical guide</a> · <a href="#status-and-limits">Status</a></p>
 
-![Smithereens: the original Zotero PDF reader beside a source-linked research conversation](docs/screenshots/reading-workspace.png)
+![Smithereens: the original Zotero PDF reader beside a source-linked research conversation](docs/screenshots/reading-workspace.jpg)
 
 ## A library that can talk back
 
@@ -27,17 +27,17 @@ Keep Zotero's paper saving, collections, tags, attachment storage, citations, no
 | **Verify** | Follow source chips to PDF pages and inspect the supporting excerpts. |
 | **Keep** | Save conversations locally and turn useful answers into editable Zotero notes. |
 
-The Folio identity pairs an ivory folded-paper **S** with forest green. The interface uses 16px chat text, restrained controls, a resizable sidebar, and system light/dark appearance.
+The Folio identity pairs an ivory folded-paper **S** with forest green. The assistant uses compact 13px chat text, an integrated composer, searchable history, and system light/dark appearance. Claude and Codex have distinct message layouts and accents, modeled on their VS Code panels. The sidebar is resizable.
 
 ## Getting started
 
 1. Open **Smithereens.app** from Applications (or from your local build).
 2. Sign in to a supported local CLI: `codex login` or `claude auth login`.
 3. Choose the **Claude Code** or **Codex** tab, open assistant settings, and select **Check connection**. No API key is required.
-4. Add papers through Zotero. Expand **Sources for this conversation**, then choose **Selected** or **Open PDF**.
+4. Add papers through Zotero. The open PDF or selected papers are included automatically when a new conversation starts. Use **+** inside the composer to pin more papers.
 5. Ask a question. Follow a citation to its page, or choose **Save as note** to keep the answer.
 
-**Cmd/Ctrl+Shift+A** toggles the assistant. Type **@** followed by part of a paper title to add it to a conversation. Each provider keeps its own conversations, drafts, and model selection. Use the model menu after connecting; custom model names and per-conversation research instructions are available in settings. **Research actions** contains the summary, comparison, and extraction shortcuts.
+**Cmd/Ctrl+Shift+A** toggles the assistant. Type **@** followed by part of a paper title to add it to a conversation. Each provider keeps its own conversations, drafts, and model selection. Open the model menu to load your available models; custom model names and per-conversation research instructions are available in settings. The **/** menu contains summary, comparison, and extraction shortcuts. The clock button opens searchable history; **Escape** dismisses a menu or stops a response. **Enter** sends and **Shift+Enter** adds a line.
 
 Smithereens uses its own profile and does not automatically adopt or migrate an existing Zotero database. When using the browser Connector, run only one Zotero-compatible desktop app at a time.
 
@@ -89,7 +89,7 @@ SMITHEREENS_LIVE_TEST=all test/runtests.sh -f research
 # Use codex or claude instead of all to test only one provider
 ```
 
-**Verified locally:** 23 desktop/integration checks and 14 standalone checks passed. Real Codex and Claude subscription requests streamed cited comparisons and retained context for follow-up questions. Tab isolation, draft/model persistence, background responses, Markdown rendering, and protocol interruption were checked. Paper import, source-linked PDF navigation, saved notes, and restored conversations were also verified. macOS Keychain-backed Claude sign-in requires a normal desktop process; a restricted shell can incorrectly report that it is signed out.
+**Verified locally:** 25 desktop/integration checks and 14 standalone checks passed. Real Codex and Claude subscription requests streamed cited comparisons and retained context for follow-up questions. Tab isolation, draft/model persistence, background responses, Markdown rendering, searchable history, command menus, keyboard dismissal, and protocol interruption were checked. Paper import, source-linked PDF navigation, saved notes, and restored conversations were also verified. macOS Keychain-backed Claude sign-in requires a normal desktop process; a restricted shell can incorrectly report that it is signed out.
 
 ## Status and limits
 

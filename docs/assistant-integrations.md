@@ -30,5 +30,11 @@ Provider coding tools are intentionally outside this research feature. Filesyste
 ## Verification
 
 - 14 standalone tests cover evidence retrieval, migration, JSONL framing, completion without duplication, rejected tool requests, cancellation, and shutdown.
-- 23 native checks cover the sidebar, tab isolation, background streaming, safe Markdown/citations, model selection, persistence, notes, collection filtering, and Zotero's original reader.
+- 25 native checks cover the sidebar, tab isolation, background streaming, safe Markdown/citations, visible model selection, searchable history, command menus, keyboard dismissal, persistence, notes, collection filtering, and Zotero's original reader.
 - Live subscription checks for both providers require multiple streamed updates, cited comparisons of two synthetic papers, populated model menus, and a follow-up answered from the retained conversation.
+
+## Extension UI reference pass
+
+The sidebar layout was compared with the installed Claude Code 2.1.220 and Codex 26.727.40816 UI assets and the vendors' [Claude Code screenshots](https://code.claude.com/docs/en/vs-code) and [Codex IDE reference](https://learn.chatgpt.com/docs/codex/ide). The temporary VS Code host did not reliably render its extension webviews in the inspection session, so the visual reference came from the official pages, supported by the installed styles.
+
+The implementation is original HTML/CSS in Zotero's native Gecko window. It recreates compact headers, prompt cards, inline attachment chips, a growing composer, icon controls, model menus, searchable history, and provider-specific colors. It does not load either vendor's proprietary webview bundle. Coding-specific controls, cloud sessions, agent tool cards, and their complete settings surfaces are not reproduced. All controls shown here operate on Smithereens paper conversations.

@@ -47,6 +47,7 @@ describe('Research workspace', function () {
 		let evidence = [{ id: 'S1', parentID: item.id, itemID: null, title: 'Test', pageLabel: 'abstract only', text: '42 samples.' }];
 		let sandbox = sinon.createSandbox();
 		sandbox.stub(Service.prototype, 'evidence').resolves({ sources: evidence, warnings: [] });
+		sandbox.stub(Providers.prototype, 'connect').resolves({ models: [{ value: 'test-model', label: 'Test model' }] });
 		sandbox.stub(Providers.prototype, 'ask').callsFake(options => { received = options; return answer; });
 		try {
 			doc.getElementById('research-tab-codex').click();
@@ -76,15 +77,71 @@ describe('Research workspace', function () {
 			assert.isNull(body.querySelector('script, img'));
 			assert.include(body.textContent, '<script>bad()</script>');
 			assert.isFalse(doc.getElementById('research-send').disabled);
-			assert.include(doc.getElementById('research-model').textContent, 'Test model');
-			doc.getElementById('research-model').value = 'test-model';
-			doc.getElementById('research-model').dispatchEvent(new win.Event('change'));
+			doc.getElementById('research-model-toggle').click();
+			await Zotero.Promise.delay(30);
+			pane.querySelector('.research-model-menu button[data-value="test-model"]').click();
+			assert.include(doc.getElementById('research-model-toggle').textContent, 'Test model');
 			doc.getElementById('research-tab-claude').click();
-			assert.equal(doc.getElementById('research-model').value, '');
+			assert.equal(doc.getElementById('research-model-toggle').dataset.value, '');
 			doc.getElementById('research-tab-codex').click();
-			assert.equal(doc.getElementById('research-model').value, 'test-model');
+			assert.equal(doc.getElementById('research-model-toggle').dataset.value, 'test-model');
 		}
 		finally { resolveAnswer({ text }); await Zotero.Promise.delay(100); sandbox.restore(); }
+	});
+
+	it('filters provider history and dismisses menus without losing the draft', async function () {
+		let doc = win.document, pane = doc.getElementById('research-pane');
+		let input = pane.querySelector('footer textarea');
+		doc.getElementById('research-tab-codex').click();
+		input.value = 'Preserve this draft'; input.dispatchEvent(new win.Event('input'));
+		doc.getElementById('research-history-toggle').click();
+		let search = pane.querySelector('.research-history input');
+		search.value = 'Only in Codex'; search.dispatchEvent(new win.Event('input'));
+		assert.equal(pane.querySelectorAll('.research-history-list button').length, 1);
+		assert.include(pane.querySelector('.research-history-list').textContent, 'Only in Codex');
+		search.value = 'no-such-conversation-123'; search.dispatchEvent(new win.Event('input'));
+		assert.equal(pane.querySelectorAll('.research-history-list button').length, 0);
+		search.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		assert.isTrue(pane.querySelector('.research-history').hidden);
+		assert.equal(input.value, 'Preserve this draft');
+		assert.equal(doc.activeElement, input);
+		input.value = '/'; input.dispatchEvent(new win.Event('input'));
+		assert.isFalse(pane.querySelector('.research-quick').hidden);
+		let compare = [...pane.querySelectorAll('.research-quick > button')].find(button => button.textContent === 'Compare');
+		compare.click();
+		assert.match(input.value, /^Compare these papers:/);
+		assert.isTrue(pane.querySelector('.research-quick').hidden);
+		input.value = 'Line of text\n'.repeat(30); input.dispatchEvent(new win.Event('input'));
+		assert.isAtMost(parseFloat(input.style.height), 180);
+		input.value = ''; input.dispatchEvent(new win.Event('input'));
+	});
+
+	it('selects models from the visible menu and isolates a late provider catalog', async function () {
+		let doc = win.document, pane = doc.getElementById('research-pane');
+		let Providers = win.require('zotero/research/providers');
+		let resolveCatalog;
+		let pending = new Promise(resolve => { resolveCatalog = resolve; });
+		let sandbox = sinon.createSandbox();
+		sandbox.stub(Providers.prototype, 'connect').returns(pending);
+		try {
+			doc.getElementById('research-tab-codex').click();
+			doc.getElementById('research-model-toggle').click();
+			assert.isFalse(pane.querySelector('.research-model-menu').hidden);
+			doc.getElementById('research-tab-claude').click();
+			resolveCatalog({ models: [{ value: 'menu-model', label: 'Menu test model' }] });
+			await Zotero.Promise.delay(50);
+			assert.notInclude(doc.getElementById('research-model-toggle').textContent, 'Menu test model');
+			assert.isTrue(pane.querySelector('.research-model-menu').hidden);
+			doc.getElementById('research-tab-codex').click();
+			doc.getElementById('research-model-toggle').click();
+			await Zotero.Promise.delay(30);
+			let choice = [...pane.querySelectorAll('.research-model-menu > button')].find(button => button.textContent === 'Menu test model');
+			assert.ok(choice); choice.click();
+			assert.include(doc.getElementById('research-model-toggle').textContent, 'Menu test model');
+			assert.equal(doc.getElementById('research-model-toggle').dataset.value, 'menu-model');
+			assert.isTrue(pane.querySelector('.research-model-menu').hidden);
+		}
+		finally { resolveCatalog({ models: [] }); sandbox.restore(); }
 	});
 
 	it('balances retrieval across papers and enforces the context budget', function () {

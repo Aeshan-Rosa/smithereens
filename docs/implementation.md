@@ -11,7 +11,7 @@ Open `dist/Smithereens.app` on this Mac. For the development library used in UI 
 3. Ask a question. Click a source chip to open that page in Zotero's reader. Hover a chip to inspect the supporting excerpt.
 4. Use **Save as note** to add an answer to your library, with Zotero PDF links. Edit it using Zotero's native note editor.
 
-The assistant can be hidden with its close button, the toolbar button, or **Cmd/Ctrl+Shift+A**. Its divider resizes the panel. Chat text is 16px; colors follow the system appearance. Item details remain available through Zotero's item-pane toggle.
+The assistant can be hidden with its close button, the toolbar button, or **Cmd/Ctrl+Shift+A**. Its divider resizes the panel. Chat text is 13px; colors follow the system appearance. Claude uses warm neutrals, a terracotta composer focus ring, and left-aligned prompt cards. Codex uses neutral colors, rounded right-aligned prompts, and a rounded composer. Item details remain available through Zotero's item-pane toggle.
 
 ## Existing subscriptions
 
@@ -19,7 +19,7 @@ Install and sign in to a recent Codex CLI (`codex login`) or Claude Code CLI (`c
 
 No API key is required. Provider children do not inherit API-key overrides. Codex runs a local App Server with an ephemeral, read-only thread and explicit overrides disabling coding tools, plugins, hooks, MCP servers, and web search. Claude uses safe mode with no tools or MCP servers. Existing subscription authentication remains available; the app does not copy or display tokens. Both providers stream text and keep the current process alive for follow-up questions. Stop uses the provider's interrupt protocol and closes the interrupted connection. Each turn has a four-minute timeout.
 
-Claude Code and Codex have separate conversations, drafts, model selections, and histories. A background response stays attached to its originating conversation while another tab is active. The model menu is populated from the local provider after connecting. Settings retain a custom model-name option. Questions and selected excerpts go to the chosen provider; its subscription limits and data policies apply.
+Claude Code and Codex have separate conversations, drafts, model selections, and histories. A background response stays attached to its originating conversation while another tab is active. Opening the model menu loads the catalog from the local provider. History is searchable within the selected provider. Paper attachments live in the composer, with library/collection scope and Crossref discovery under its + menu; research templates are in the / menu. Settings retain a custom model-name option. Questions and selected excerpts go to the chosen provider; its subscription limits and data policies apply.
 
 Up to four idle conversations can remain warm in memory. After the app closes, a process exits, a conversation is evicted, or source files/instructions/models change, the next question reconnects with bounded recent history. Provider sessions are ephemeral. Version 1 Smithereens history is backed up to `research-workspace.json.v1.bak` before migration to version 2; existing messages are retained and assigned to a provider tab. Interrupted messages are marked explicitly on reopening.
 
