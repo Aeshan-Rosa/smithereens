@@ -24,6 +24,10 @@
 #research-pane :focus-visible { outline: 2px solid var(--research-accent); outline-offset: 2px; }
 #research-pane .research-actions { display: flex; gap: 4px; }
 #research-pane .research-actions button { border: 0; background: transparent; font-size: 18px; padding: 4px 7px; }
+#research-pane .research-tabs { display: flex; border-bottom: 1px solid var(--research-border); padding-inline: 12px; gap: 14px; }
+#research-pane .research-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 4px; background: transparent; color: var(--research-muted); }
+#research-pane .research-tabs button[aria-selected="true"] { border-bottom-color: var(--research-accent); color: var(--research-text); font-weight: 600; }
+#research-pane .research-tabs button.running::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 7px; border-radius: 50%; background: var(--research-accent); }
 #research-pane .research-sources { padding: 10px 16px; border-block: 1px solid var(--research-border); }
 #research-pane summary { color: var(--research-muted); font-size: 12px; cursor: pointer; }
 #research-pane .research-source-actions, #research-pane .research-quick { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; }
@@ -40,6 +44,12 @@
 #research-pane .research-message > small { color: var(--research-muted); font-size: 11px; }
 #research-pane .research-answer { font-size: 16px; line-height: 1.6; }
 #research-pane .research-answer p { margin: 7px 0; white-space: pre-wrap; }
+#research-pane .research-answer ul, #research-pane .research-answer ol { padding-inline-start: 22px; }
+#research-pane .research-answer li { margin-block: 7px; }
+#research-pane .research-answer pre { overflow-x: auto; background: var(--research-card); padding: 12px; border: 1px solid var(--research-border); border-radius: 6px; }
+#research-pane .research-answer code { font-family: ui-monospace, monospace; font-size: .85em; }
+#research-pane .research-answer a[role="link"] { color: var(--research-accent); cursor: pointer; text-decoration: underline; }
+#research-pane .research-working { color: var(--research-muted); font-size: 14px; }
 #research-pane .research-answer h3 { font-size: 16px; margin: 16px 0 7px; }
 #research-pane .research-message.user .research-answer { font-weight: 500; }
 #research-pane .research-citation { font-size: 11px; color: var(--research-accent); padding: 1px 5px; margin-inline: 2px; vertical-align: baseline; }
@@ -47,13 +57,16 @@
 #research-pane .research-message-actions button { font-size: 11px; border: 0; background: transparent; color: var(--research-muted); padding: 4px 0; }
 #research-pane .research-table { overflow-x: auto; }
 #research-pane table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
-#research-pane td { border: 1px solid var(--research-border); padding: 8px; min-width: 100px; }
+#research-pane td, #research-pane th { border: 1px solid var(--research-border); padding: 8px; min-width: 100px; }
 #research-pane tr:first-child { font-weight: 600; }
-#research-pane .research-quick { padding: 10px 16px; border-top: 1px solid var(--research-border); }
+#research-pane .research-quick { display: block; padding: 10px 0; }
+#research-pane .research-quick button { margin: 6px 5px 0 0; }
 #research-pane footer { padding: 0 14px 12px; }
 #research-pane textarea { width: 100%; resize: vertical; min-height: 70px; max-height: 180px; font-size: 16px; line-height: 1.4; }
 #research-pane .research-compose-actions { display: flex; align-items: center; gap: 8px; padding-top: 8px; }
 #research-pane .research-compose-actions small { flex: 1; color: var(--research-muted); }
+#research-pane .research-compose-actions select { flex: 1; min-width: 0; max-width: 240px; font-size: 12px; }
+#research-pane .research-compose-hint { display: block; color: var(--research-muted); font-size: 10px; margin-top: 8px; }
 #research-pane .research-primary { background: var(--research-accent); color: white; border-color: transparent; }
 #research-pane .research-primary:hover { background: #194b3a; }
 #research-pane .research-status { color: var(--research-muted); font-size: 11px; line-height: 1.4; margin-top: 8px; max-height: 60px; overflow-y: auto; }

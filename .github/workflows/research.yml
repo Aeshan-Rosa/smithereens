@@ -17,7 +17,9 @@ jobs:
           node --check chrome/content/zotero/researchPane.js
           node --check chrome/content/zotero/research/service.js
           node --check chrome/content/zotero/research/providers.js
+          node --check chrome/content/zotero/research/connection.js
+          node --check chrome/content/zotero/research/clients.js
       - name: Test evidence retrieval and provider events
-        run: node --test test/research-core.test.cjs
+        run: node --test test/research-*.test.cjs
       - name: Check patch whitespace
         run: git diff --check HEAD

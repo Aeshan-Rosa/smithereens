@@ -15,9 +15,15 @@ The assistant can be hidden with its close button, the toolbar button, or **Cmd/
 
 ## Existing subscriptions
 
-Install and sign in to a recent Codex CLI (`codex login`) or Claude Code CLI (`claude auth login`). Choose the provider in assistant settings and click **Check connection**. A custom executable path and model name are optional. The implementation was verified with Codex CLI 0.162.1 and Claude Code CLI 2.1.319. Both providers passed a real subscription request comparing two synthetic papers with separate source citations. Claude requires an active first-party subscription login before questions can run; macOS Keychain access must be available to the process checking its status.
+Install and sign in to a recent Codex CLI (`codex login`) or Claude Code CLI (`claude auth login`). Choose the Claude Code or Codex tab, open assistant settings, and click **Check connection**. A custom executable path and model name are optional. The implementation was verified with Codex CLI 0.162.1 and Claude Code CLI 2.1.319. Both providers passed a real subscription request comparing two synthetic papers with separate source citations. Claude requires an active first-party subscription login before questions can run; macOS Keychain access must be available to the process checking its status.
 
-No API key is required. Provider children do not inherit API key overrides. Codex uses an ephemeral, read-only, isolated CLI request with user configuration, shell, plugins, hooks, and web search disabled. Claude uses safe mode with no tools or MCP servers. The app does not copy or display authentication tokens. Questions, bounded prior conversation, and selected excerpts go to the chosen provider; its subscription limits and data policies apply. Codex displays completed message events; Claude supports text deltas. Requests can be stopped and have a four-minute limit.
+No API key is required. Provider children do not inherit API-key overrides. Codex runs a local App Server with an ephemeral, read-only thread and explicit overrides disabling coding tools, plugins, hooks, MCP servers, and web search. Claude uses safe mode with no tools or MCP servers. Existing subscription authentication remains available; the app does not copy or display tokens. Both providers stream text and keep the current process alive for follow-up questions. Stop uses the provider's interrupt protocol and closes the interrupted connection. Each turn has a four-minute timeout.
+
+Claude Code and Codex have separate conversations, drafts, model selections, and histories. A background response stays attached to its originating conversation while another tab is active. The model menu is populated from the local provider after connecting. Settings retain a custom model-name option. Questions and selected excerpts go to the chosen provider; its subscription limits and data policies apply.
+
+Up to four idle conversations can remain warm in memory. After the app closes, a process exits, a conversation is evicted, or source files/instructions/models change, the next question reconnects with bounded recent history. Provider sessions are ephemeral. Version 1 Smithereens history is backed up to `research-workspace.json.v1.bak` before migration to version 2; existing messages are retained and assigned to a provider tab. Interrupted messages are marked explicitly on reopening.
+
+Markdown is parsed with raw HTML and remote images disabled. Tables scroll horizontally, and evidence references become PDF-page buttons. Source text is untrusted data. The implementation and upstream protocol references are described in [assistant integrations](assistant-integrations.md).
 
 ## Research features
 
@@ -47,9 +53,9 @@ test/runtests.sh research reader
 SMITHEREENS_LIVE_TEST=all test/runtests.sh -f research
 ```
 
-The macOS package is locally ad-hoc signed, not notarized for public distribution. Upstream application updates are disabled so they cannot replace this fork. Other platforms retain upstream build scripts but have not been packaged or verified here. The upstream dependency lockfile is preserved; npm reports inherited vulnerabilities that need a separate dependency audit before public distribution.
+The macOS package is locally ad-hoc signed, not notarized for public distribution. Upstream application updates are disabled so they cannot replace this fork. Other platforms retain upstream build scripts but have not been packaged or verified here. The dependency lockfile includes inherited packages; npm reports inherited vulnerabilities that need a separate dependency audit before public distribution.
 
-Main additions are `chrome/content/zotero/research/`, `researchPane.js`, and `chrome/skin/default/zotero/research.css`. `js-build/research.js` compiles the pinned upstream SDT text helpers; the reader itself is unchanged. Tests cover native UI mounting, PDF extraction and reader opening, retrieval budgeting, collection isolation, history persistence, notes, provider events, and cancellation. The optional live test checks subscription auth and a cited response.
+Main additions are `chrome/content/zotero/research/`, `researchPane.js`, and `chrome/skin/default/zotero/research.css`. `js-build/research.js` compiles the pinned upstream SDT text helpers; the reader itself is unchanged. Tests cover native UI mounting, PDF extraction and reader opening, retrieval budgeting, collection isolation, history persistence, notes, provider events, and cancellation. The optional live tests check subscription auth, model catalogs, multiple text updates before completion, citations, and a follow-up using the same live conversation. Standalone tests exercise fragmented JSONL, interruption, process closure, and history migration.
 
 ## Upstream and license
 

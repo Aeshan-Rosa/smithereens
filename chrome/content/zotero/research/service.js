@@ -7,15 +7,15 @@ class ResearchService {
 		this.Zotero = Zotero;
 		this.providers = new Providers(Zotero);
 		this.path = PathUtils.join(Zotero.Profile.dir, 'research-workspace.json');
-		this.state = { version: 1, settings: { provider: 'codex', model: '', instructions: '', executables: {} }, sessions: [] };
+		this.state = Core.migrateState({ version: 2, settings: { provider: 'codex' }, sessions: [] });
 		this._writes = Promise.resolve();
 	}
 
 	async load() {
 		if (await IOUtils.exists(this.path)) {
 			let state = await IOUtils.readJSON(this.path);
-			if (state.version !== 1 || !Array.isArray(state.sessions)) throw new Error('Unsupported research history format. Your history has not been overwritten.');
-			this.state = state;
+			this.state = Core.migrateState(state);
+			if (state.version === 1 && !await IOUtils.exists(this.path + '.v1.bak')) await IOUtils.copy(this.path, this.path + '.v1.bak');
 		}
 		return this.state;
 	}
@@ -29,10 +29,16 @@ class ResearchService {
 		return this._writes;
 	}
 
-	newSession() {
-		let session = { id: Zotero.Utilities.randomString(16), title: 'New conversation', created: Date.now(), sources: [], messages: [] };
+	newSession(provider = this.state.settings.provider) {
+		let session = { id: Zotero.Utilities.randomString(16), provider, draft: '', title: 'New conversation', created: Date.now(), sources: [], messages: [] };
 		this.state.sessions.unshift(session);
+		this.state.activeSessions[provider] = session.id;
 		return session;
+	}
+
+	activeSession(provider) {
+		return this.state.sessions.find(s => s.provider === provider && s.id === this.state.activeSessions[provider])
+			|| this.state.sessions.find(s => s.provider === provider) || this.newSession(provider);
 	}
 
 	async resolve(items) {

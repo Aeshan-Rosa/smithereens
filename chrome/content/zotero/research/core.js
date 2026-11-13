@@ -86,4 +86,19 @@ function escapeHTML(text) {
 	return String(text).replace(/[&<>"']/g, x => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[x]));
 }
 
-module.exports = { terms, chunks, retrieve, prompt, parseEvent, escapeHTML };
+function migrateState(state) {
+	if (![1, 2].includes(state.version) || !Array.isArray(state.sessions)) throw new Error('Unsupported research history format. Your history has not been overwritten.');
+	let settings = state.settings || {};
+	let provider = settings.provider === 'claude' ? 'claude' : 'codex';
+	return { ...state, version: 2, activeSessions: state.activeSessions || {},
+		settings: { ...settings, provider, executables: settings.executables || {},
+			models: settings.models || { codex: provider === 'codex' ? settings.model || '' : '', claude: provider === 'claude' ? settings.model || '' : '' } },
+		sessions: state.sessions.map(session => ({ ...session,
+			provider: session.provider || session.messages.find(m => m.provider)?.provider || provider,
+			draft: session.draft || '', sources: session.sources || [],
+			messages: session.messages.map(message => message.pending
+				? { ...message, pending: false, error: 'Interrupted when the app closed. Send your question again to continue.' } : message)
+		})) };
+}
+
+module.exports = { terms, chunks, retrieve, prompt, parseEvent, escapeHTML, migrateState };

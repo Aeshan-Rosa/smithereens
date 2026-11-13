@@ -8,12 +8,83 @@ describe('Research workspace', function () {
 		service = new Service(Zotero);
 		service.path = PathUtils.join(Zotero.Profile.dir, 'research-test-history.json');
 	});
-	after(function () { win.Zotero_Tabs.closeAll(); win.close(); });
+	after(function () { service.providers.dispose(); win.Zotero_Tabs.closeAll(); win.close(); });
 
 	it('mounts the assistant alongside the original library', async function () {
 		await Zotero.Promise.delay(300);
 		assert.ok(win.document.querySelector('#research-pane textarea'));
 		assert.ok(win.document.getElementById('zotero-items-tree'));
+	});
+
+	it('keeps drafts and model choices separate between provider tabs', async function () {
+		let doc = win.document, input = doc.querySelector('#research-pane footer textarea');
+		let select = provider => doc.getElementById(`research-tab-${provider}`).click();
+		let draft = text => { input.value = text; input.dispatchEvent(new win.Event('input')); };
+		select('codex'); draft('Codex draft');
+		select('claude'); draft('Claude draft');
+		select('codex');
+		assert.equal(input.value, 'Codex draft');
+		assert.equal(doc.getElementById('research-tab-codex').getAttribute('aria-selected'), 'true');
+		select('claude');
+		assert.equal(input.value, 'Claude draft');
+		draft('');
+		select('codex'); draft('');
+		await Zotero.Promise.delay(300);
+		let saved = await IOUtils.readJSON(PathUtils.join(Zotero.Profile.dir, 'research-workspace.json'));
+		assert.ok(saved.activeSessions.claude);
+		assert.notEqual(saved.activeSessions.claude, saved.activeSessions.codex);
+	});
+
+	it('isolates a background response and renders safe Markdown with source links', async function () {
+		this.timeout(10000);
+		let doc = win.document, pane = doc.getElementById('research-pane');
+		let Service = win.require('zotero/research/service'), Providers = win.require('zotero/research/providers');
+		let item = await createDataObject('item', { title: 'Sidebar context test' });
+		await win.ZoteroPane.selectItem(item.id);
+		let resolveAnswer, received;
+		let answer = new Promise(resolve => { resolveAnswer = resolve; });
+		let text = '## Findings\n\n- **Evidence** [S1]\n\n| Paper | Count |\n| --- | --- |\n| Test | 42 |\n\n`code`\n\n<script>bad()</script>\n\n![remote](https://example.com/tracker.png)';
+		let evidence = [{ id: 'S1', parentID: item.id, itemID: null, title: 'Test', pageLabel: 'abstract only', text: '42 samples.' }];
+		let sandbox = sinon.createSandbox();
+		sandbox.stub(Service.prototype, 'evidence').resolves({ sources: evidence, warnings: [] });
+		sandbox.stub(Providers.prototype, 'ask').callsFake(options => { received = options; return answer; });
+		try {
+			doc.getElementById('research-tab-codex').click();
+			pane.querySelector('button[title="New conversation"]').click();
+			let input = pane.querySelector('footer textarea');
+			input.value = 'Only in Codex'; input.dispatchEvent(new win.Event('input'));
+			doc.getElementById('research-send').click();
+			for (let i = 0; i < 50 && !received; i++) await Zotero.Promise.delay(50);
+			assert.ok(received, 'Provider receives the question');
+			assert.isTrue(doc.getElementById('research-send').disabled);
+			doc.getElementById('research-tab-claude').click();
+			input.value = 'Keep this Claude draft'; input.dispatchEvent(new win.Event('input'));
+			received.onModels([{ value: 'test-model', label: 'Test model' }]);
+			received.onText(text);
+			await Zotero.Promise.delay(80);
+			assert.notInclude(doc.getElementById('research-conversation').textContent, 'Only in Codex');
+			assert.isFalse(doc.getElementById('research-send').disabled);
+			resolveAnswer({ text });
+			await Zotero.Promise.delay(100);
+			assert.equal(input.value, 'Keep this Claude draft');
+			doc.getElementById('research-tab-codex').click();
+			let body = pane.querySelector('.assistant .research-answer');
+			assert.ok(body.querySelector('ul li strong'));
+			assert.ok(body.querySelector('table th'));
+			assert.ok(body.querySelector('code'));
+			assert.ok(body.querySelector('.research-citation'));
+			assert.isNull(body.querySelector('script, img'));
+			assert.include(body.textContent, '<script>bad()</script>');
+			assert.isFalse(doc.getElementById('research-send').disabled);
+			assert.include(doc.getElementById('research-model').textContent, 'Test model');
+			doc.getElementById('research-model').value = 'test-model';
+			doc.getElementById('research-model').dispatchEvent(new win.Event('change'));
+			doc.getElementById('research-tab-claude').click();
+			assert.equal(doc.getElementById('research-model').value, '');
+			doc.getElementById('research-tab-codex').click();
+			assert.equal(doc.getElementById('research-model').value, 'test-model');
+		}
+		finally { resolveAnswer({ text }); await Zotero.Promise.delay(100); sandbox.restore(); }
 	});
 
 	it('balances retrieval across papers and enforces the context budget', function () {
@@ -103,7 +174,8 @@ describe('Research workspace', function () {
 			let status = await service.providers.status(provider);
 			assert.isTrue(status.connected, status.message);
 			let updates = [];
-			let result = await service.providers.ask({ provider, prompt: Core.prompt({
+			let conversationID = `live-${provider}`;
+			let result = await service.providers.ask({ provider, conversationID, prompt: Core.prompt({
 				question: 'Compare the sample counts in Paper A and Paper B. State each count and cite its source separately. Use two short sentences.',
 				sources: [
 					{ id: 'S1', title: 'Paper A', pageLabel: '1', text: 'The experiment included 42 samples.' },
@@ -114,8 +186,17 @@ describe('Research workspace', function () {
 			assert.include(result.text, '17');
 			assert.include(result.text, '[S1]');
 			assert.include(result.text, '[S2]');
-			assert.isAbove(updates.length, 0);
+			assert.isAbove(updates.length, 1, 'Answer must stream before completion');
 			assert.equal(updates.at(-1).trim(), result.text);
+			let client = await service.providers.connect({ provider, conversationID });
+			assert.isAbove(client.models.length, 0, 'Provider must supply its model menu');
+			assert.equal(client.turns, 1);
+			let followup = await service.providers.ask({ provider, conversationID,
+				prompt: 'What was the count in Paper B we just discussed? Reply briefly with its source citation.',
+				onText: () => {}, signal: new win.AbortController().signal });
+			assert.include(followup.text, '17');
+			assert.include(followup.text, '[S2]');
+			assert.equal(client.turns, 2, 'Follow-up must reuse the live conversation');
 		});
 	}
 });

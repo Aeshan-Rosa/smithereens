@@ -25,5 +25,13 @@ module.exports = async function () {
 		if (previous !== code) await fs.writeFile(output, code);
 	}
 	await compile('fulltext.js');
+	let markdownTarget = path.resolve(__dirname, '../build/resource/research-markdown.js');
+	await fs.copyFile(path.resolve(__dirname, '../node_modules/markdown-it/dist/markdown-it.js'), markdownTarget);
+	let licenses = path.resolve(__dirname, '../build/resource/research-licenses');
+	await fs.mkdir(licenses, { recursive: true });
+	for (let [name, filename] of Object.entries({ 'markdown-it': 'LICENSE', entities: 'LICENSE', 'linkify-it': 'LICENSE',
+		mdurl: 'LICENSE', 'punycode.js': 'LICENSE-MIT.txt', 'uc.micro': 'LICENSE.txt' })) {
+		await fs.copyFile(path.resolve(__dirname, `../node_modules/${name}/${filename}`), path.join(licenses, `${name}.txt`));
+	}
 	return { action: 'research-sdt', count: seen.size, totalCount: seen.size, processingTime: Date.now() - started };
 };

@@ -33,11 +33,11 @@ The Folio identity pairs an ivory folded-paper **S** with forest green. The inte
 
 1. Open **Smithereens.app** from Applications (or from your local build).
 2. Sign in to a supported local CLI: `codex login` or `claude auth login`.
-3. Open assistant settings, choose the provider, and select **Check connection**. No API key is required.
-4. Add papers through Zotero. Select them and click **Selected**, or open a PDF and choose **Open PDF**.
+3. Choose the **Claude Code** or **Codex** tab, open assistant settings, and select **Check connection**. No API key is required.
+4. Add papers through Zotero. Expand **Sources for this conversation**, then choose **Selected** or **Open PDF**.
 5. Ask a question. Follow a citation to its page, or choose **Save as note** to keep the answer.
 
-**Cmd/Ctrl+Shift+A** toggles the assistant. Type **@** followed by part of a paper title to add it to a conversation. Model names and per-conversation research instructions are optional.
+**Cmd/Ctrl+Shift+A** toggles the assistant. Type **@** followed by part of a paper title to add it to a conversation. Each provider keeps its own conversations, drafts, and model selection. Use the model menu after connecting; custom model names and per-conversation research instructions are available in settings. **Research actions** contains the summary, comparison, and extraction shortcuts.
 
 Smithereens uses its own profile and does not automatically adopt or migrate an existing Zotero database. When using the browser Connector, run only one Zotero-compatible desktop app at a time.
 
@@ -47,7 +47,9 @@ Zotero's document worker extracts page-aware text. Smithereens selects a bounded
 
 - **Existing subscriptions:** Codex uses your ChatGPT login; Claude Code uses your first-party Claude subscription login. Subscription limits apply.
 - **Explicit context:** Up to 24 pinned or retrieved papers and a 64,000-character excerpt budget per answer. Collection/library search uses Zotero's indexed search.
-- **Local history:** Conversations stay in the Smithereens profile. Questions, excerpts, and bounded conversation context are sent to the selected provider.
+- **Separate conversations:** Claude Code and Codex have independent tabs, histories, drafts, and model menus. You can switch tabs while an answer streams.
+- **Live connections:** Codex App Server and Claude’s bidirectional streaming protocol keep a conversation open for follow-ups, with streaming text and working Stop controls.
+- **Local history:** Conversations stay in the Smithereens profile. Provider sessions are ephemeral; after reopening, bounded recent history is replayed with the current evidence.
 - **Restricted requests:** Provider processes use an isolated working directory with coding tools and integrations disabled. API-key overrides are removed from their environment.
 - **Visible uncertainty:** Unavailable PDFs and abstract-only sources are labeled. The assistant is instructed to distinguish reported findings from interpretation.
 
@@ -77,7 +79,7 @@ The source retains Zotero's other platform build scripts; Windows and Linux pack
 
 ```sh
 # Fast tests; these also run in GitHub Actions
-node --test test/research-core.test.cjs
+node --test test/research-*.test.cjs
 
 # Native desktop integration and original reader regression tests
 test/runtests.sh research reader
@@ -87,13 +89,13 @@ SMITHEREENS_LIVE_TEST=all test/runtests.sh -f research
 # Use codex or claude instead of all to test only one provider
 ```
 
-**Verified locally:** 21 desktop/integration checks and 7 standalone checks passed. Real Codex and Claude subscription requests compared two synthetic papers with citations. Paper import, source-linked PDF navigation, saved notes, and restored conversations were also verified. macOS Keychain-backed Claude sign-in requires a normal desktop process; a restricted shell can incorrectly report that it is signed out.
+**Verified locally:** 23 desktop/integration checks and 14 standalone checks passed. Real Codex and Claude subscription requests streamed cited comparisons and retained context for follow-up questions. Tab isolation, draft/model persistence, background responses, Markdown rendering, and protocol interruption were checked. Paper import, source-linked PDF navigation, saved notes, and restored conversations were also verified. macOS Keychain-backed Claude sign-in requires a normal desktop process; a restricted shell can incorrectly report that it is signed out.
 
 ## Status and limits
 
 This is an initial working desktop build. Deep review is a bounded response over retrieved excerpts, not an autonomous web-research agent. Library search is not an exhaustive systematic review. Scanned PDFs need a searchable text layer; automatic OCR and visual interpretation of figures/equations are planned. The original viewer can still display and annotate those documents.
 
-Upstream automatic app updates are disabled to preserve the fork. The upstream dependency lockfile is retained and has known npm audit findings; a dependency audit is needed before public binary distribution.
+Upstream automatic app updates are disabled to preserve the fork. The dependency lockfile includes inherited npm audit findings; a dependency audit is needed before public binary distribution.
 
 ## Project structure
 
@@ -104,7 +106,7 @@ chrome/skin/default/zotero/research.css
 app/branding/                   Approved Folio artwork
 scripts/                        Branding, packaging, development launch
 test/tests/researchTest.js       Native integration tests
-test/research-core.test.cjs      Fast evidence/protocol tests
+test/research-*.test.cjs         Fast evidence, migration, and protocol tests
 docs/                           Screenshots and implementation notes
 ```
 
@@ -113,3 +115,5 @@ docs/                           Screenshots and implementation notes
 Smithereens incorporates the Zotero 10.0.9 source snapshot at [`0f25aca`](https://github.com/zotero/zotero/commit/0f25aca5e5e087fa44404c134fd384e2aeca4eda). Its reader and document-worker submodules remain pinned to that release. Existing copyright and license notices are preserved.
 
 Licensed under [AGPL-3.0-or-later](COPYING). This is an independent modified build, not an official Zotero release. Zotero is a trademark of the Corporation for Digital Scholarship. Report Smithereens-specific issues in [this repository](https://github.com/Aeshan-Rosa/smithereens/issues).
+
+The assistant uses original adapters inspired by the architecture of the VS Code integrations, not copied extension webviews. See the [integration notes](docs/assistant-integrations.md). Markdown rendering uses [markdown-it](https://github.com/markdown-it/markdown-it) under its MIT license; bundled dependency notices are included in the app.

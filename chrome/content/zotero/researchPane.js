@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 var ResearchPane = new function () {
-	let service, session, controller, labels, root, messages, sources, composer, status, settings, history, mentions, projectInstructions;
+	let service, session, labels, root, messages, sources, composer, status, settings, history, mentions, projectInstructions;
+	let tabs, modelSelect, modelInput, executableInput, draftTimer, markdown, mentionRequest = 0;
+	let controllers = new Map(), statuses = new Map(), catalogs = new Map();
+	let busy = () => controllers.has(session?.id);
 	let ready = false;
 	let html = (tag, props = {}, ...children) => {
 		let node = document.createElementNS('http://www.w3.org/1999/xhtml', tag);
@@ -26,7 +29,7 @@ var ResearchPane = new function () {
 		if (ready) return;
 		ready = true;
 		root = document.getElementById('research-pane');
-		let keys = ['title', 'new', 'history', 'settings', 'close', 'sources', 'selected', 'current', 'collection', 'library', 'send', 'stop', 'placeholder', 'empty', 'summary', 'compare', 'matrix', 'claims', 'screen', 'draft', 'deep', 'save-note', 'copy', 'check', 'provider', 'model', 'instructions', 'path', 'disclosure', 'ready', 'remove', 'clear', 'discover'];
+		let keys = ['title', 'new', 'history', 'settings', 'close', 'sources', 'selected', 'current', 'collection', 'library', 'send', 'stop', 'placeholder', 'empty', 'summary', 'compare', 'matrix', 'claims', 'screen', 'draft', 'deep', 'save-note', 'copy', 'check', 'provider', 'model', 'instructions', 'path', 'disclosure', 'ready', 'remove', 'clear', 'discover', 'tabs', 'actions', 'working', 'responding', 'connecting', 'models', 'default-model', 'context', 'send-hint'];
 		let values = await document.l10n.formatValues(keys.map(key => ({ id: `research-${key}` })));
 		labels = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
 		let Service = require('zotero/research/service');
@@ -34,29 +37,42 @@ var ResearchPane = new function () {
 		status = html('div', { className: 'research-status', role: 'status', 'aria-live': 'polite' });
 		try { await service.load(); }
 		catch (e) { root.append(status); setStatus(e.message, true); return; }
-		session = service.state.sessions[0] || service.newSession();
+		session = service.activeSession(service.state.settings.provider);
+		markdown = require('resource://zotero/research-markdown.js')({ html: false, linkify: false, breaks: true });
+		markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(tokens[index].content);
 		let header = html('header', {}, html('div', { className: 'research-brand' },
 			html('img', { src: 'chrome://zotero/skin/smithereens-icon.png', alt: '', width: '30', height: '30' }),
 			html('strong', {}, 'Smithereens')), html('div', { className: 'research-actions' },
-			button('+', () => { if (controller) return; session = service.newSession(); render(); return service.save(); }, { title: labels.new, 'aria-label': labels.new }),
+			button('+', () => activate(service.newSession(session.provider)), { title: labels.new, 'aria-label': labels.new }),
 			button('◷', () => { history.hidden = !history.hidden; renderHistory(); }, { title: labels.history, 'aria-label': labels.history }),
 			button('⚙', () => { settings.hidden = !settings.hidden; }, { title: labels.settings, 'aria-label': labels.settings }),
 			button('×', () => this.toggle(), { title: labels.close, 'aria-label': labels.close })));
+		tabs = html('div', { className: 'research-tabs', role: 'tablist', 'aria-label': labels.tabs },
+			...['claude', 'codex'].map(provider => button(provider === 'claude' ? 'Claude Code' : 'Codex', () => activate(service.activeSession(provider)),
+				{ role: 'tab', id: `research-tab-${provider}`, 'aria-controls': 'research-conversation' })));
+		tabs.addEventListener('keydown', event => {
+			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+				event.preventDefault(); safely(async () => { await activate(service.activeSession(session.provider === 'codex' ? 'claude' : 'codex')); document.getElementById(`research-tab-${session.provider}`).focus(); });
+			}
+		});
 		history = html('div', { className: 'research-history', hidden: 'hidden' });
 		settings = buildSettings();
 		sources = html('div', { className: 'research-source-list' });
-		let sourcePicker = html('details', { open: 'open', className: 'research-sources' },
+		let sourcePicker = html('details', { className: 'research-sources' },
 			html('summary', {}, labels.sources),
 			html('div', { className: 'research-source-actions' },
 				...['selected', 'current', 'collection', 'library'].map(scope => button(labels[scope], () => addSources(scope)))), sources);
-		messages = html('div', { className: 'research-messages', 'aria-label': labels.title });
+		messages = html('div', { id: 'research-conversation', className: 'research-messages', role: 'tabpanel', 'aria-label': labels.title, tabindex: '0' });
 		mentions = html('div', { className: 'research-mentions', hidden: 'hidden', 'aria-label': 'Matching papers' });
 		composer = html('textarea', { rows: '3', placeholder: labels.placeholder, 'aria-label': labels.placeholder,
 			onkeydown: event => {
 				if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); safely(send); }
 			} });
-		let mentionTimer, mentionRequest = 0;
+		let mentionTimer;
 		composer.addEventListener('input', () => {
+			session.draft = composer.value;
+			clearTimeout(draftTimer);
+			draftTimer = setTimeout(() => safely(() => service.save()), 250);
 			clearTimeout(mentionTimer);
 			let request = ++mentionRequest;
 			let match = composer.value.match(/@([^@\n]{2,})$/);
@@ -67,9 +83,12 @@ var ResearchPane = new function () {
 				let items = await Zotero.Items.getAsync((await search.search()).slice(0, 6));
 				if (request !== mentionRequest) return;
 				mentions.replaceChildren(...items.filter(i => i.isRegularItem()).map(item => button(item.getField('title'), async () => {
-					if (controller) return;
-					await mergeSources(await service.resolve([item]));
+					if (busy()) return;
+					let current = session;
+					await mergeSources(await service.resolve([item]), current);
+					if (session !== current) return;
 					composer.value = composer.value.replace(/@[^@\n]+$/, `“${item.getField('title')}” `);
+					session.draft = composer.value; await service.save();
 					mentions.hidden = true; composer.focus();
 				})));
 				mentions.hidden = !mentions.childElementCount;
@@ -84,14 +103,19 @@ var ResearchPane = new function () {
 			draft: 'Draft a concise literature synthesis using these papers. Organize by themes, distinguish evidence from interpretation, and cite every substantive claim. Topic: ',
 			deep: 'Conduct a bounded evidence review of the provided excerpts: map the central claims, compare methods and results, identify contradictions and gaps, then synthesize with citations. List what cannot be assessed from these excerpts.'
 		};
-		let quick = html('div', { className: 'research-quick' }, ...Object.entries(templates).map(([key, text]) => button(labels[key], () => { composer.value = text; composer.focus(); })));
+		let quick = html('details', { className: 'research-quick' }, html('summary', {}, labels.actions), ...Object.entries(templates).map(([key, text]) => button(labels[key], () => { session.draft = text; composer.value = text; composer.focus(); safely(() => service.save()); })));
 		let sendButton = button(labels.send, send, { className: 'research-primary', id: 'research-send' });
-		let stopButton = button(labels.stop, () => controller?.abort(), { id: 'research-stop', hidden: 'hidden' });
-		root.append(header, history, settings, buildDiscovery(), sourcePicker, messages, quick,
-			html('footer', {}, mentions, composer, html('div', { className: 'research-compose-actions' },
-				html('small', { id: 'research-provider-label' }, service.state.settings.provider), stopButton, sendButton), status));
+		let stopButton = button(labels.stop, () => controllers.get(session.id)?.abort(), { id: 'research-stop', hidden: 'hidden' });
+		modelSelect = html('select', { id: 'research-model', 'aria-label': labels.models });
+		modelSelect.addEventListener('change', () => safely(async () => {
+			service.state.settings.models[session.provider] = modelSelect.value;
+			modelInput.value = modelSelect.value; await service.save();
+		}));
+		root.append(header, tabs, history, settings, buildDiscovery(), sourcePicker, messages,
+			html('footer', {}, quick, mentions, composer, html('div', { className: 'research-compose-actions' },
+				modelSelect, stopButton, sendButton), html('small', { className: 'research-compose-hint' }, labels['send-hint']), status));
 		render();
-		setStatus(session.sources.length ? `${session.sources.length} papers ready.` : labels.ready);
+		setStatus(labels.ready);
 		if (!Zotero.Prefs.get('research.initialized')) {
 			ZoteroPane.itemPane.collapsed = true;
 			Zotero.Prefs.set('research.initialized', true);
@@ -105,18 +129,23 @@ var ResearchPane = new function () {
 			let control = doc.createElement('button');
 			control.textContent = 'Ask assistant';
 			control.addEventListener('click', () => safely(async () => {
-				if (controller) return;
+				if (busy()) return;
+				let current = session;
 				this.show();
 				let docs = await service.resolve([Zotero.Items.get(reader.itemID)]);
-				mergeSources(docs);
+				await mergeSources(docs, current);
+				if (session !== current) return;
 				composer.value = `Explain this passage in context:\n\n${params.annotation.text}`;
-				composer.focus();
+				session.draft = composer.value; await service.save(); composer.focus();
 			}));
 			append(control);
 		};
 		Zotero.Reader.registerEventListener('renderTextSelectionPopup', onSelection);
 		window.addEventListener('unload', () => {
-			controller?.abort();
+			clearTimeout(draftTimer);
+			for (let controller of controllers.values()) controller.abort();
+			service.providers.dispose();
+			service.save().catch(error => Zotero.logError(error));
 			Zotero.Reader.unregisterEventListener('renderTextSelectionPopup', onSelection);
 		}, { once: true });
 	};
@@ -132,39 +161,74 @@ var ResearchPane = new function () {
 		if (!pane.hidden) composer?.focus();
 	};
 
+	async function activate(next) {
+		mentionRequest++;
+		session.draft = composer.value;
+		session = next;
+		service.state.settings.provider = session.provider;
+		service.state.activeSessions[session.provider] = session.id;
+		mentions.hidden = true; history.hidden = true;
+		render();
+		await service.save();
+		composer.focus();
+	}
+
+	function renderModels() {
+		let selected = service.state.settings.models[session.provider] || '';
+		let options = [{ value: '', label: labels['default-model'] }, ...(catalogs.get(session.provider) || [])];
+		if (selected && !options.some(o => o.value === selected)) options.push({ value: selected, label: selected });
+		modelSelect.replaceChildren(...options.map(option => html('option', { value: option.value }, option.label)));
+		modelSelect.value = selected;
+		modelSelect.disabled = busy();
+	}
+
+	function updateControls() {
+		document.getElementById('research-send').disabled = busy();
+		document.getElementById('research-stop').hidden = !busy();
+		for (let tab of tabs.children) {
+			let provider = tab.id.replace('research-tab-', '');
+			let selected = session.provider === provider;
+			tab.setAttribute('aria-selected', String(selected));
+			tab.setAttribute('tabindex', selected ? '0' : '-1');
+			tab.classList.toggle('running', service.state.sessions.some(s => s.provider === provider && controllers.has(s.id)));
+		}
+		messages.setAttribute('aria-labelledby', `research-tab-${session.provider}`);
+		let state = statuses.get(session.id);
+		setStatus(state?.text || labels.ready, state?.error);
+		renderModels();
+	}
+
 	function buildSettings() {
-		let prefs = service.state.settings;
-		let provider = html('select', { 'aria-label': labels.provider },
-			html('option', { value: 'codex' }, 'Codex · ChatGPT'), html('option', { value: 'claude' }, 'Claude Code'));
-		provider.value = prefs.provider;
-		let model = html('input', { placeholder: 'Provider default', 'aria-label': labels.model });
-		model.value = prefs.model;
-		let executable = html('input', { placeholder: 'Auto-detect', 'aria-label': labels.path });
-		executable.value = prefs.executables[prefs.provider] || '';
-		let instructions = html('textarea', { rows: '3', 'aria-label': labels.instructions });
-		projectInstructions = instructions;
-		instructions.value = session.instructions || '';
+		modelInput = html('input', { placeholder: labels['default-model'], 'aria-label': labels.model });
+		executableInput = html('input', { placeholder: 'Auto-detect', 'aria-label': labels.path });
+		projectInstructions = html('textarea', { rows: '3', 'aria-label': labels.instructions });
 		let persist = () => safely(async () => {
-			prefs.model = model.value.trim(); session.instructions = instructions.value;
-			prefs.executables[prefs.provider] = executable.value.trim();
-			await service.save();
+			if (busy()) return;
+			service.state.settings.models[session.provider] = modelInput.value.trim();
+			service.state.settings.executables[session.provider] = executableInput.value.trim();
+			session.instructions = projectInstructions.value;
+			renderModels(); await service.save();
 		});
-		provider.addEventListener('change', () => {
-			if (controller) { provider.value = prefs.provider; return; }
-			prefs.provider = provider.value; prefs.model = ''; model.value = '';
-			executable.value = prefs.executables[prefs.provider] || '';
-			document.getElementById('research-provider-label').textContent = prefs.provider;
-			persist();
+		for (let node of [modelInput, executableInput, projectInstructions]) node.addEventListener('change', persist);
+		let check = button(labels.check, async () => {
+			if (busy()) return;
+			let current = session, prefs = service.state.settings;
+			check.disabled = true;
+			try {
+				setStatus(labels.connecting);
+				let result = await service.providers.status(current.provider, prefs.executables[current.provider]);
+				if (result.connected) {
+					let client = await service.providers.connect({ provider: current.provider, model: prefs.models[current.provider], executable: prefs.executables[current.provider] });
+					catalogs.set(current.provider, client.models);
+				}
+				statuses.set(current.id, { text: result.connected ? `Connected · ${result.message}` : result.message, error: !result.connected });
+				if (session === current) updateControls();
+			}
+			finally { check.disabled = false; }
 		});
-		for (let node of [model, instructions, executable]) node.addEventListener('change', persist);
 		return html('section', { className: 'research-settings', hidden: 'hidden' },
-			html('label', {}, labels.provider, provider), html('label', {}, labels.model, model),
-			html('label', {}, labels.path, executable), html('label', {}, labels.instructions, instructions),
-			button(labels.check, async () => {
-				setStatus('Checking sign-in…');
-				let result = await service.providers.status(prefs.provider, executable.value.trim());
-				setStatus(result.connected ? `Connected · ${result.message}` : result.message || `Sign in with ${prefs.provider} in Terminal.`, !result.connected);
-			}), html('p', { className: 'research-disclosure' }, labels.disclosure));
+			html('label', {}, labels.model, modelInput), html('label', {}, labels.path, executableInput),
+			html('label', {}, labels.instructions, projectInstructions), check, html('p', { className: 'research-disclosure' }, labels.disclosure));
 	}
 
 	function buildDiscovery() {
@@ -201,17 +265,19 @@ var ResearchPane = new function () {
 			html('p', {}, 'Search public metadata. Your search terms are sent to Crossref.'), input, search, results);
 	}
 
-	function mergeSources(docs) {
-		if (session.sources.length + docs.filter(d => !session.sources.some(s => s.parentID === d.parentID)).length > 24) throw new Error('A conversation supports up to 24 pinned papers. Remove some sources first.');
+	function mergeSources(docs, current = session) {
+		if (controllers.has(current.id)) return;
+		if (current.sources.length + docs.filter(d => !current.sources.some(s => s.parentID === d.parentID)).length > 24) throw new Error('A conversation supports up to 24 pinned papers. Remove some sources first.');
 		for (let doc of docs) {
-			if (!session.sources.some(x => x.parentID === doc.parentID)) session.sources.push(doc);
+			if (!current.sources.some(x => x.parentID === doc.parentID)) current.sources.push(doc);
 		}
-		renderSources();
+		if (session === current) renderSources();
 		return service.save();
 	}
 
 	async function addSources(scope) {
-		if (controller) return;
+		if (busy()) return;
+		let current = session;
 		let items;
 		if (scope === 'current') {
 			let reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
@@ -236,34 +302,40 @@ var ResearchPane = new function () {
 		if (!items.length) throw new Error('Select one or more papers in the library first.');
 		if (items.length > 24) throw new Error('Choose up to 24 papers for one conversation. Select a smaller collection or a subset in the library.');
 		let docs = await service.resolve(items);
-		if (session.sources.length + docs.filter(d => !session.sources.some(s => s.parentID === d.parentID)).length > 24) throw new Error('A conversation supports up to 24 papers. Remove some sources first.');
-		await mergeSources(docs);
-		setStatus(`${session.sources.length} papers in this conversation`);
+		await mergeSources(docs, current);
+		if (session === current) setStatus(`${current.sources.length} papers in this conversation`);
 	}
 
 	function renderSources() {
 		sources.replaceChildren(...session.sources.map(source => html('div', { className: 'research-source' },
 			button(source.title, () => source.itemID ? Zotero.Reader.open(source.itemID) : ZoteroPane.selectItem(source.parentID), { title: source.title }),
-			button('×', async () => { if (controller) return; session.sources = session.sources.filter(x => x !== source); renderSources(); await service.save(); }, { 'aria-label': `${labels.remove} ${source.title}` }))));
+			button('×', async () => { if (busy()) return; session.sources = session.sources.filter(x => x !== source); renderSources(); await service.save(); }, { 'aria-label': `${labels.remove} ${source.title}` }))));
 		if (session.scope) sources.prepend(html('div', { className: 'research-scope' },
 			html('small', {}, `Search: ${session.scope.name} · up to 24 matching papers per answer`),
-			button('×', async () => { if (controller) return; delete session.scope; renderSources(); await service.save(); }, { 'aria-label': 'Remove search scope' })));
+			button('×', async () => { if (busy()) return; delete session.scope; renderSources(); await service.save(); }, { 'aria-label': 'Remove search scope' })));
 		if (!session.sources.length && !session.scope) sources.append(html('p', {}, 'Select papers in your library, then choose “Selected”.'));
 	}
 
 	function renderHistory() {
-		history.replaceChildren(...service.state.sessions.map(saved => button(saved.title, () => {
-			if (controller) return; session = saved; history.hidden = true; render();
-		}, { className: saved.id === session.id ? 'active' : '' })));
+		history.replaceChildren(...service.state.sessions.filter(saved => saved.provider === session.provider).map(saved => button(saved.title,
+			() => activate(saved), { className: saved.id === session.id ? 'active' : '' })));
 	}
 
-	function render() {
+	function render(preserveScroll = false) {
+		let scroll = messages.scrollTop;
+		let atBottom = messages.scrollHeight - scroll - messages.clientHeight < 90;
 		renderSources(); renderHistory();
-		if (projectInstructions) projectInstructions.value = session.instructions || '';
+		projectInstructions.value = session.instructions || '';
+		modelInput.value = service.state.settings.models[session.provider] || '';
+		executableInput.value = service.state.settings.executables[session.provider] || '';
+		for (let input of [projectInstructions, modelInput, executableInput]) input.disabled = busy();
+		composer.value = session.draft || '';
 		messages.replaceChildren();
-		if (!session.messages.length) messages.append(html('div', { className: 'research-empty' }, html('h2', {}, 'Read. Ask. Understand.'), html('p', {}, labels.empty)));
+		if (!session.messages.length) messages.append(html('div', { className: 'research-empty' },
+			html('h2', {}, session.provider === 'claude' ? 'Claude Code' : 'Codex'), html('p', {}, labels.empty)));
 		for (let message of session.messages) renderMessage(message);
-		messages.scrollTop = messages.scrollHeight;
+		messages.scrollTop = preserveScroll && !atBottom ? scroll : messages.scrollHeight;
+		updateControls();
 	}
 
 	function inline(node, text, evidence) {
@@ -280,28 +352,37 @@ var ResearchPane = new function () {
 
 	function renderAnswer(target, message) {
 		target.replaceChildren();
-		let lines = message.text.split('\n'), table;
-		for (let line of lines) {
-			if (/^\s*\|.*\|\s*$/.test(line)) {
-				if (/^\s*\|[\s:|\-]+\|\s*$/.test(line)) continue;
-				if (!table) { table = html('table'); target.append(html('div', { className: 'research-table' }, table)); }
-				let row = html('tr');
-				for (let cell of line.trim().slice(1, -1).split('|')) { let td = html('td'); inline(td, cell.trim(), message.evidence); row.append(td); }
-				table.append(row);
+		if (message.pending && !message.text) {
+			target.append(html('p', { className: 'research-working' }, labels.working)); return;
+		}
+		// Markdown emits only its own markup; raw HTML and remote images are disabled.
+		let parsed = new DOMParser().parseFromString(markdown.render(message.text), 'text/html');
+		for (let node of [...parsed.body.childNodes]) target.append(document.importNode(node, true));
+		for (let link of target.querySelectorAll('a')) {
+			let href = link.getAttribute('href');
+			link.removeAttribute('href');
+			if (/^https?:\/\//i.test(href || '')) {
+				link.setAttribute('role', 'link'); link.setAttribute('tabindex', '0');
+				link.addEventListener('click', () => Zotero.launchURL(href));
+				link.addEventListener('keydown', event => { if (event.key === 'Enter') Zotero.launchURL(href); });
 			}
-			else {
-				table = null;
-				let element = html(/^#{1,4}\s/.test(line) ? 'h3' : 'p');
-				inline(element, line.replace(/^#{1,4}\s/, ''), message.evidence);
-				target.append(element);
-			}
+		}
+		let walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT), texts = [], node;
+		while ((node = walker.nextNode())) {
+			if (!node.parentElement.closest('pre, code, a') && /\[S\d+\]/.test(node.textContent)) texts.push(node);
+		}
+		for (let text of texts) {
+			let span = html('span'); inline(span, text.textContent, message.evidence); text.replaceWith(span);
+		}
+		for (let table of target.querySelectorAll('table')) {
+			let wrapper = html('div', { className: 'research-table' }); table.replaceWith(wrapper); wrapper.append(table);
 		}
 	}
 
 	function renderMessage(message) {
 		let body = html('div', { className: 'research-answer' });
 		renderAnswer(body, message);
-		let article = html('article', { className: `research-message ${message.role}` },
+		let article = html('article', { className: `research-message ${message.role}`, 'data-message-id': message.id || '' },
 			html('small', {}, message.role === 'user' ? 'You' : (message.provider || 'Assistant')), body);
 		if (message.role === 'assistant' && !message.pending) {
 			article.append(html('div', { className: 'research-message-actions' },
@@ -322,52 +403,69 @@ var ResearchPane = new function () {
 	}
 
 	async function send() {
-		if (controller || !composer.value.trim()) return;
-		if (!session.sources.length && !session.scope) await addSources(Zotero.Reader.getByTabID(Zotero_Tabs.selectedID) ? 'current' : 'selected');
-		if (!session.sources.length && !session.scope) throw new Error('Add papers to the conversation first.');
+		if (busy() || !composer.value.trim()) return;
+		let current = session, provider = current.provider, prefs = service.state.settings;
+		let model = prefs.models[provider], executable = prefs.executables[provider];
 		let question = composer.value.trim();
-		let prefs = { ...service.state.settings };
-		let previous = session.messages.filter(m => !m.error && !m.pending);
-		controller = new AbortController();
-		document.getElementById('research-send').disabled = true;
-		document.getElementById('research-stop').hidden = false;
-		let answer = { role: 'assistant', text: '', provider: prefs.provider, pending: true, evidence: [] };
-		if (!session.messages.length) session.title = question.slice(0, 60);
-		session.messages.push({ role: 'user', text: question }, answer);
-		composer.value = '';
-		render();
-		let body = messages.lastElementChild.querySelector('.research-answer');
+		let previous = current.messages.filter(m => !m.error && !m.pending);
+		let selectedReader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+		let selectedItems = selectedReader ? [Zotero.Items.get(selectedReader.itemID)] : ZoteroPane.getSelectedItems();
+		let controller = new AbortController();
+		controllers.set(current.id, controller);
+		let answer = { id: Zotero.Utilities.randomString(16), role: 'assistant', text: '', provider, pending: true, evidence: [] };
+		if (!current.messages.length) current.title = question.slice(0, 60);
+		current.messages.push({ role: 'user', text: question }, answer);
+		current.draft = ''; composer.value = '';
+		let report = (text, error = false) => {
+			statuses.set(current.id, { text, error });
+			if (session === current) setStatus(text, error);
+		};
+		report(labels.connecting); render();
+		let paintTimer;
 		try {
-			let documents = session.sources.slice();
-			if (session.scope) {
-				setStatus('Searching your library…');
-				let matches = await service.searchScope(session.scope, question, controller.signal);
+			await service.save();
+			if (!current.sources.length && !current.scope) {
+				if (!selectedItems.length) throw new Error('Select a paper in your library or open a PDF first.');
+				if (selectedItems.length > 24) throw new Error('Select up to 24 papers for this conversation.');
+				current.sources = await service.resolve(selectedItems);
+				if (session === current) renderSources();
+			}
+			let documents = current.sources.slice();
+			if (current.scope) {
+				report('Searching your library…');
+				let matches = await service.searchScope(current.scope, question, controller.signal);
 				documents.push(...matches.filter(d => !documents.some(p => p.parentID === d.parentID)).slice(0, 24 - documents.length));
 			}
-			let { sources: evidence, warnings } = await service.evidence(documents, question, controller.signal, setStatus);
-			answer.evidence = evidence;
-			answer.warnings = warnings;
-			setStatus(`${prefs.provider === 'codex' ? 'Codex is working' : 'Claude is responding'} · ${evidence.length} excerpts${warnings.length ? ` · ${warnings.length} source warnings` : ''}`);
-			let lastPaint = 0;
-			let result = await service.providers.ask({ provider: prefs.provider, model: prefs.model,
-				executable: prefs.executables[prefs.provider], signal: controller.signal,
-				prompt: require('zotero/research/core').prompt({ question, sources: evidence, history: previous, instructions: session.instructions || '' }),
+			let { sources: evidence, warnings } = await service.evidence(documents, question, controller.signal, report);
+			answer.evidence = evidence; answer.warnings = warnings;
+			let contextKey = JSON.stringify([current.instructions || '', [...new Set(evidence.map(e => `${e.parentID}:${e.itemID}:${e.fileHash || ''}`))].sort()]);
+			let result = await service.providers.ask({ provider, model, executable, conversationID: current.id, contextKey,
+				signal: controller.signal,
+				prompt: continued => require('zotero/research/core').prompt({ question, sources: evidence, history: continued ? [] : previous, instructions: current.instructions || '' }),
+				onModels: models => { catalogs.set(provider, models); if (session === current) renderModels(); },
+				onStatus: phase => report(phase === 'responding' ? labels.responding : labels.working),
 				onText: text => {
 					answer.text = text;
-					if (Date.now() - lastPaint < 70) return;
-					let atBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 90;
-					renderAnswer(body, answer); lastPaint = Date.now();
-					if (atBottom) messages.scrollTop = messages.scrollHeight;
+					if (paintTimer) return;
+					paintTimer = setTimeout(() => {
+						paintTimer = null;
+						if (session !== current) return;
+						let body = messages.querySelector(`[data-message-id="${answer.id}"] .research-answer`);
+						if (!body) return;
+						let atBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 90;
+						renderAnswer(body, answer);
+						if (atBottom) messages.scrollTop = messages.scrollHeight;
+					}, 50);
 				} });
 			answer.text = result.text; answer.usage = result.usage;
-			setStatus(warnings.length ? warnings.join(' · ') : 'Answer complete · check citations against the original papers.');
+			report(warnings.length ? warnings.join(' · ') : 'Answer complete · check citations against the original papers.');
 		}
-		catch (e) { answer.error = e.message; setStatus(e.message, true); }
+		catch (error) { answer.error = error.message; report(error.message, true); }
 		finally {
-			answer.pending = false; controller = null;
-			document.getElementById('research-send').disabled = false;
-			document.getElementById('research-stop').hidden = true;
-			render(); await service.save(); composer.focus();
+			clearTimeout(paintTimer); answer.pending = false; controllers.delete(current.id);
+			if (session === current) render(true);
+			else updateControls();
+			await service.save();
 		}
 	}
 };
